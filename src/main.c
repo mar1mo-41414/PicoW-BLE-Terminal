@@ -13,6 +13,7 @@
 //                                 from a BTStack timer so the whole
 //                                 firmware pumps off one event loop.
 #include "pico/stdlib.h"
+#include "pico/cyw43_arch.h"
 
 #include "btstack.h"
 
@@ -108,6 +109,21 @@ static void stdio_poll(btstack_timer_source_t *ts) {
     btstack_run_loop_add_timer(ts);
 }
 
+// --- Wi-Fi background poll --------------------------------------------------
+//
+// pico_cyw43_arch_lwip_poll only advances the network stack when
+// cyw43_arch_poll() is called. During long idle periods we pump it
+// from a BTStack timer so Wi-Fi keeps working even if no CLI command
+// is currently spinning its own wait loop.
+
+static btstack_timer_source_t g_net_poll_timer;
+
+static void net_poll_expired(btstack_timer_source_t *ts) {
+    cyw43_arch_poll();
+    btstack_run_loop_set_timer(ts, 5);
+    btstack_run_loop_add_timer(ts);
+}
+
 // ---- Wi-Fi auto-connect ----------------------------------------------------
 //
 // Fires a couple of seconds after boot so BTStack has already brought
@@ -176,6 +192,12 @@ int main(void) {
     g_stdio_timer.process = stdio_poll;
     btstack_run_loop_set_timer(&g_stdio_timer, 10);
     btstack_run_loop_add_timer(&g_stdio_timer);
+
+    // Wi-Fi (poll mode) idle pump: 5 ms cadence so incoming packets are
+    // processed even without an active CLI wait loop.
+    g_net_poll_timer.process = net_poll_expired;
+    btstack_run_loop_set_timer(&g_net_poll_timer, 5);
+    btstack_run_loop_add_timer(&g_net_poll_timer);
 
     // Kick off Wi-Fi auto-connect 2 s after boot — by then BTStack is
     // through HCI bring-up and BLE is advertising, so the join blocking

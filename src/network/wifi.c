@@ -35,6 +35,13 @@ int wifi_connect(const char *ssid, const char *psk, uint32_t timeout_ms) {
         LOGW("wifi: connect failed rc=%d", rc);
         return rc;
     }
+
+    // Disable CYW43 power-save so short RX bursts (e.g. ARP replies)
+    // aren't dropped while the chip is dozing between beacons. Many
+    // consumer APs send unicast responses fast enough that a doze
+    // interval swallows them; this made outbound-initiated ARP look
+    // completely broken while inbound-initiated (PC → Pico) worked.
+    cyw43_wifi_pm(&cyw43_state, CYW43_NONE_PM);
     return 0;
 }
 

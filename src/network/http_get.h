@@ -46,6 +46,12 @@ http_result_t http_get(const char *url,
                        uint32_t timeout_ms,
                        size_t *out_total);
 
+// Diagnostic: the LwIP err_t recorded by the last http_get(). 0 means
+// no LwIP-visible failure — the transfer ended cleanly or the failure
+// was above LwIP (e.g. URL parse). Useful for surfacing the underlying
+// stack error to the shell.
+int http_get_last_lwip_err(void);
+
 #ifdef __cplusplus
 }
 #endif

@@ -70,10 +70,16 @@ target_link_libraries(${APP_TARGET} PRIVATE
     pico_stdlib
     pico_btstack_ble
     pico_btstack_cyw43
-    # Wi-Fi + BT coexist: the lwip_threadsafe_background arch drives LwIP
-    # from an async_context worker, freeing us from polling in the main
-    # loop while still letting BTStack use its own run loop.
-    pico_cyw43_arch_lwip_threadsafe_background
+    # Wi-Fi + BT coexist. We use lwip_POLL rather than threadsafe_background
+    # because our BLE command handlers (run inside BTStack's shared
+    # async_context) need to make blocking LwIP calls and then wait for
+    # responses. Under threadsafe_background, waiting for LwIP work from
+    # inside an async_context callback deadlocks (we're the very thing
+    # supposed to be processing that work). Under poll mode, LwIP only
+    # advances when we explicitly call cyw43_arch_poll(), which we do
+    # both from a periodic BTStack timer AND from inside our own wait
+    # loops in http_get / cmd_net.
+    pico_cyw43_arch_lwip_poll
     hardware_adc
     hardware_gpio
     hardware_watchdog

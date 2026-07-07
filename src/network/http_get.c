@@ -172,6 +172,10 @@ static size_t feed_header_bytes(ctx_t *ctx, const uint8_t *data, size_t len) {
 
 // ---- LwIP callbacks --------------------------------------------------------
 
+static volatile int g_last_lwip_err = 0;
+
+int http_get_last_lwip_err(void) { return g_last_lwip_err; }
+
 static void mark_complete(ctx_t *ctx, http_result_t r) {
     if (ctx->complete) return;
     ctx->result = r;
@@ -181,7 +185,8 @@ static void mark_complete(ctx_t *ctx, http_result_t r) {
 
 static void tcp_err_cb(void *arg, err_t err) {
     ctx_t *ctx = arg;
-    LOGE("http: tcp err %d", (int)err);
+    g_last_lwip_err = (int)err;
+    LOGE("http: tcp err %d (body=%u)", (int)err, (unsigned)ctx->body_received);
     // pcb has already been freed by LwIP by the time err fires.
     ctx->pcb = NULL;
     mark_complete(ctx, HTTP_ERR_ABORTED);
@@ -328,6 +333,7 @@ http_result_t http_get(const char *url,
                        void *user,
                        uint32_t timeout_ms,
                        size_t *out_total) {
+    g_last_lwip_err = 0;
     static ctx_t ctx;  // static: only one download in flight at a time
     memset(&ctx, 0, sizeof(ctx));
     ctx.chunk_cb = chunk_cb;
@@ -350,9 +356,12 @@ http_result_t http_get(const char *url,
     }
     cyw43_arch_lwip_end();
 
-    // Busy-wait for the state machine to reach a terminal state. The
-    // threadsafe_background arch drives all the LwIP work from an
-    // async_context worker so we don't have to poll anything ourselves.
+    // Wait for the state machine to reach a terminal state. Use
+    // cyw43_arch_wait_for_work_until (not sleep_ms) — under
+    // threadsafe_background the LwIP callbacks fire from an async_context
+    // worker that we mustn't starve. sleep_ms can hold the CPU in a way
+    // that prevents that worker from running, which manifested as
+    // LwIP timers not ticking during our wait.
     absolute_time_t deadline = (timeout_ms > 0)
         ? make_timeout_time_ms(timeout_ms)
         : at_the_end_of_time;
@@ -364,6 +373,8 @@ http_result_t http_get(const char *url,
             mark_complete(&ctx, HTTP_ERR_TIMEOUT);
             break;
         }
+        // Under lwip_poll, we're the only thing pumping LwIP / CYW43.
+        cyw43_arch_poll();
         sleep_ms(2);
     }
 

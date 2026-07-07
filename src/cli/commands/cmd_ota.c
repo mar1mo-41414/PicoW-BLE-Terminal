@@ -8,6 +8,7 @@
 #include "ota/ota.h"
 #include "network/http_get.h"
 #include "network/wifi.h"
+#include "storage/config.h"
 #include "system/sha256.h"
 
 #include <string.h>
@@ -91,13 +92,34 @@ static int cmd_download(cli_ctx_t *ctx, const char *url, const char *sha_hex) {
         return CLI_ERR_HARDWARE;
     }
 
+    // The 8-second erase phase disables interrupts in ~45 ms chunks per
+    // sector. That's enough that the CYW43 driver can lose track of the
+    // AP even though our tcpip layer still thinks it's up. Force a
+    // status recheck and bail early if the link is gone.
+    if (!wifi_is_connected()) {
+        cli_write(ctx, "ota: Wi-Fi dropped during erase — reconnecting...\r\n");
+        wifi_creds_t creds;
+        if (config_load_wifi(&creds)) {
+            wifi_connect(creds.ssid, creds.psk, 15000);
+        }
+        if (!wifi_is_connected()) {
+            cli_write(ctx, "ota: Wi-Fi did not come back; aborting\r\n");
+            ota_abort();
+            return CLI_ERR_HARDWARE;
+        }
+    }
+
     cli_printf(ctx, "ota: fetching %s\r\n", url);
     dl_state_t st = { .ctx = ctx };
     size_t total = 0;
     http_result_t hr = http_get(url, on_chunk, &st, 120000, &total);
     if (hr != HTTP_OK || st.error) {
-        cli_printf(ctx, "ota: download failed (http=%d, ota=%s)\r\n",
-                   (int)hr, st.error ? "flash-write" : "ok");
+        int lerr = http_get_last_lwip_err();
+        cli_printf(ctx, "ota: download failed (http=%d, lwip=%d, ota=%s)\r\n",
+                   (int)hr, lerr, st.error ? "flash-write" : "ok");
+        if (!wifi_is_connected()) {
+            cli_write(ctx, "     Wi-Fi: link now DOWN\r\n");
+        }
         ota_abort();
         return CLI_ERR_HARDWARE;
     }

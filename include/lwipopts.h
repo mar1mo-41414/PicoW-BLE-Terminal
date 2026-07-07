@@ -16,11 +16,22 @@
 // Use pico's malloc, not LwIP's mem pool for regular allocations.
 #define MEM_LIBC_MALLOC             0
 #define MEM_ALIGNMENT               4
-#define MEM_SIZE                    4000
+// Bumped from 4000 — a smaller heap was tight enough that ARP request
+// pbufs sometimes couldn't be allocated when other traffic was pending,
+// which manifested as ARP just never leaving the interface.
+#define MEM_SIZE                    16000
 
 #define MEMP_NUM_TCP_SEG            32
 #define MEMP_NUM_ARP_QUEUE          10
 #define PBUF_POOL_SIZE              24
+
+// Queue outbound packets while waiting for ARP resolution instead of
+// dropping them. Cheap safety net.
+#define ARP_QUEUEING                1
+// Populate the ARP cache from incoming IP traffic (source IP + MAC).
+// Without this the first exchange with a peer relies entirely on our
+// own ARP round-trip completing.
+#define ETHARP_TRUST_IP_MAC         1
 
 #define LWIP_ARP                    1
 #define LWIP_ETHERNET               1
