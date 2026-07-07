@@ -4,13 +4,13 @@ Raspberry Pi Pico W 用の **BLE UART ターミナル**ファームウェア。
 スマートフォンや PC から Bluetooth (Nordic UART Service) 経由で接続し、
 Unix ライクな CLI で Pico を操作できます。
 
-単なる GPIO サンプルではなく、
-今後さまざまな機能を追加していける「小型 OS」を目指した構造になっています。
+- 疎結合な CLI コマンドレジストリ (**ファイル 1 個ドロップイン**でコマンド追加)
+- 3-way ログ sink (BLE / USB serial / 将来の Wi-Fi など)
+- Wi-Fi + HTTP + SHA-256 検証 + **独立ブートローダ + dual-slot OTA + 自動ロールバック**
+- 保守性・拡張性を最優先した「小型 OS」志向の構成
 
-- 疎結合な CLI コマンドレジストリ (ファイル追加のみで拡張可能)
-- ログサブシステム (BLE / USB serial / 将来の Wi-Fi へ同時出力)
-- OTA 更新フックとパーティション設計
-- 保守性・拡張性を最優先
+詳細な内部仕様は [`docs/SPEC.md`](docs/SPEC.md) を、
+将来やりたいことは [`docs/ROADMAP.md`](docs/ROADMAP.md) を参照。
 
 ---
 
@@ -25,10 +25,10 @@ Unix ライクな CLI で Pico を操作できます。
 
 ### 依存
 
-- [pico-sdk](https://github.com/raspberrypi/pico-sdk) (最新版, サブモジュール展開済)
+- [pico-sdk](https://github.com/raspberrypi/pico-sdk)(サブモジュール展開済)
 - arm-none-eabi-gcc
 - CMake 3.13+
-- Python 3 (`compile_gatt.py` 用)
+- Python 3(BTStack `compile_gatt.py` 用)
 
 ### 手順
 
@@ -39,19 +39,41 @@ cmake -S . -B build -DPICO_BOARD=pico_w
 cmake --build build -j
 ```
 
-`build/picoble_terminal.uf2` を BOOTSEL 状態の Pico にドラッグ&ドロップして書き込みます。
+生成物:
 
-Pico 2 W (RP2350) を使う場合は `-DPICO_BOARD=pico2_w`。
+| ファイル | 用途 |
+|---|---|
+| `build/bootloader/picoble_terminal_boot.uf2` | ブートローダ (0x10000000 起点、16 KB) |
+| `build/picoble_terminal_a.uf2` | slot A アプリ (0x10004000 起点、768 KB 枠) |
+| `build/picoble_terminal_b.uf2` | slot B アプリ (0x100C4000 起点、768 KB 枠) |
+
+`.bin` も同時に出力されるので、OTA サーバから配信する場合はそちらを使います。
+
+Pico 2 W (RP2350) の場合: `-DPICO_BOARD=pico2_w`(未検証、要動作確認)。
+
+---
+
+## 初回書き込み
+
+Pico を BOOTSEL(BOOTSEL ボタンを押しながら USB 接続)にし、
+以下の 2 つを順にドラッグ&ドロップ:
+
+1. `build/bootloader/picoble_terminal_boot.uf2`
+2. `build/picoble_terminal_a.uf2`
+
+再起動するとブートローダがメタデータを初期化して slot A を起動します。
+
+以降の更新は **OTA**(後述)で無線から差し替え可能で、
+BOOTSEL 経由の再書き込みは不要です。
 
 ---
 
 ## 使い方
 
-1. 書き込み後、Pico を再起動。
-2. `Pico-Terminal` という名前で BLE アドバタイズが始まります。
-3. **nRF Connect** / **Serial Bluetooth Terminal** など NUS (Nordic UART Service) に対応した
-   クライアントから接続。
-4. 接続直後にプロンプトが送られてきます:
+1. 電源投入後、`Pico-Terminal` として BLE アドバタイズが始まります
+2. **nRF Connect** / **Bluefruit Connect** / **Serial Bluetooth Terminal** など
+   NUS 対応クライアントから接続
+3. 接続直後にプロンプトが送られてきます:
 
 ```
 PicoBLE Terminal v0.1.1
@@ -60,25 +82,25 @@ Type "help"
 >
 ```
 
-USB でシリアル (CDC) に接続すると同じ入出力がミラーリングされ、
-BLE がなくても動作確認できます。
+USB CDC 経由でも同じシェルにアクセスできます(BLE と USB は独立した行バッファを持ちます)。
 
 ---
 
 ## 内蔵コマンド
 
 | コマンド | 概要 |
-|----------|------|
-| `help` | 登録済みコマンド一覧を表示 |
-| `version` | ファームウェアと SDK のバージョン |
-| `echo <text...>` | 引数をそのまま表示 |
+|---|---|
+| `help [cmd]` | コマンド一覧 / 個別コマンドの Usage |
+| `version` | ファームウェア + SDK + ビルド日時 |
+| `echo <args...>` | 引数を表示(引数パースの動作確認用) |
 | `clear` | 画面クリア (ANSI エスケープ) |
-| `gpio <pin> read\|high\|low\|toggle` | GPIO 操作 |
-| `adc <pin> read` | ADC 読み取り (GPIO 26–29) |
+| `gpio <pin> read\|high\|low\|toggle` | GPIO 制御(GPIO 23-25 は CYW43 予約警告) |
+| `adc <pin> read` | ADC 読み取り(GPIO 26-29) |
 | `system info` | ハードウェア / BLE / Wi-Fi / uptime |
 | `uptime` | 起動からの経過時間 |
-| `wifi status\|connect <ssid> <psk>\|forget` | Wi-Fi 状態 / 接続 / 資格情報消去 |
-| `ota status\|download <url> [sha256]\|abort` | OTA イメージのステージング |
+| `wifi status\|connect <ssid> <psk>\|forget` | Wi-Fi 制御 |
+| `net info\|arp <ip>\|test <host> <port>` | ネットワーク診断 |
+| `ota status\|download <url> [sha]\|apply\|confirm\|abort` | OTA 制御 |
 | `reboot` | ウォッチドッグでソフトリセット |
 
 エラー表示は Linux ライクに:
@@ -91,191 +113,141 @@ Usage:
 
 ---
 
-## 新しいコマンドの追加
+## コマンドを追加する
 
-コマンドは **`src/cli/commands/` にファイルを 1 つ追加するだけ**で登録できます。
+**`src/cli/commands/` にファイル 1 つ足すだけ**で新しいコマンドを登録できます。
 
-`src/cli/commands/cmd_hello.c` を作成:
+`src/cli/commands/cmd_hello.c`:
 
 ```c
-#include <stdio.h>
+#include "cli/cli.h"
 #include "cli/command.h"
 
 static int cmd_hello(int argc, char **argv, cli_ctx_t *ctx) {
-    (void)argc; (void)argv;
-    cli_printf(ctx, "hello, world\n");
-    return 0;
+    if (argc > 1) {
+        cli_printf(ctx, "hello, %s\r\n", argv[1]);
+    } else {
+        cli_write(ctx, "hello, world\r\n");
+    }
+    return CLI_OK;
 }
 
 CLI_COMMAND_REGISTER(hello,
-    /* summary */ "print a greeting",
-    /* usage   */ "hello",
+    "print a greeting",
+    "hello [name]",
     cmd_hello);
 ```
 
-`CLI_COMMAND_REGISTER` マクロが GCC の `__attribute__((constructor))` を使って
-自動的にコマンドテーブルへ登録します。
-CMake は `src/cli/commands/*.c` を glob するので、
-再 configure すればビルドに含まれます (`cmake -S . -B build` を再実行)。
+再 configure + ビルド:
 
-サブコマンド (`gpio X high` のような形) は
-ハンドラの中で `argv[1]` を見て分岐してください。
+```bash
+cmake -S . -B build
+cmake --build build -j
+```
+
+- CMake の `file(GLOB ...)` がディレクトリを見にいくため、
+  ファイル追加後は 1 度 configure(`cmake -S . -B build`)が必要
+- `CLI_COMMAND_REGISTER` マクロが GCC の `__attribute__((constructor))` で
+  起動時に自動登録します(中央のテーブルには何も手を加えなくて良い)
+
+**サブコマンド、引数バリデーション、Usage 慣習、返り値、出力方法**の詳細と
+コピペしやすいテンプレートは [`docs/SPEC.md`](docs/SPEC.md#コマンドを追加する) に。
 
 ---
 
 ## ディレクトリ構成
 
 ```
+bootloader/                独立ブートローダ (別 CMake target)
+  main.c                   スロット選択・ロールバック判定・ジャンプ
+  CMakeLists.txt
+linker/                    3 種類の memmap_*.ld
+  memmap_bootloader.ld     0x10000000 / 16 KB
+  memmap_app_slot_a.ld     0x10004000 / 768 KB
+  memmap_app_slot_b.ld     0x100C4000 / 768 KB
+include/
+  btstack_config.h         BTStack のアプリ側設定
+  lwipopts.h               LwIP のアプリ側設定
+  ota_metadata.h           ブートローダとアプリの共有 struct
+docs/
+  SPEC.md                  実装仕様書 (拡張ポイント / 契約 / 内部設計)
+  ROADMAP.md               将来の機能案
 src/
-  main.c                 起動 / メインループ
+  main.c                   起動 / メインループ / タイマ配線
   cli/
-    cli.c                行受信 → プロンプト → ディスパッチ
-    parser.c             空白 / ダブルクォート引数パーサ
-    command.c            コマンドレジストリ (自動登録)
-    commands/            各コマンドの実装 (追加はここへ)
+    cli.c                  行受信 → プロンプト → ディスパッチ
+    parser.c               空白 / ダブルクォート引数パーサ
+    command.c              コマンドレジストリ (自動登録)
+    commands/              各コマンドの実装 (← ここに追加)
   ble/
-    ble_nus.c            Nordic UART Service + アドバタイズ
-    nus.gatt             GATT データベース定義
+    ble_nus.c              Nordic UART Service + アドバタイズ
+    nus.gatt               GATT データベース定義
   system/
-    log.c                sink 抽象化 (BLE/USB/Wi-Fi)
-    uptime.c             起動時刻
-    sysinfo.c            system info の実装本体
-  drivers/
-    gpio_ctrl.c          GPIO ラッパ
-    adc_ctrl.c           ADC ラッパ
+    log.c                  sink 抽象化
+    uptime.c               起動時刻
+    sysinfo.c              system info の実装本体
+    sha256.c               自前 SHA-256
+  drivers/                 ペリフェラルドライバ薄ラッパ (← 追加はここへ)
+    gpio_ctrl.c
+    adc_ctrl.c
   ota/
-    ota.c                OTA API とパーティション設計 (雛形)
-  network/               将来: Wi-Fi / HTTP / MQTT
-  storage/               将来: KVS / スクリプト
-include/                 公開ヘッダ (現状未使用)
+    ota.c                  ステージング + メタデータ + apply/confirm
+  network/
+    wifi.c                 STA 接続
+    http_get.c             LwIP raw TCP HTTP クライアント
+  storage/
+    config.c               flash セクタ内 KV
 ```
-
----
-
-## ログサブシステム
-
-`src/system/log.c` は複数の **sink** を持つリング状のリストです。
-`log_write(LOG_INFO, "msg\n")` は登録されている全 sink に書き出されます。
-BLE 接続時は BLE sink が、USB CDC 経由でも USB sink が受け取ります。
-将来 Wi-Fi TCP sink や syslog sink を追加できます。
-
-CLI 出力は `cli_ctx_t.print()` を通るため、
-テスト時にはメモリバッファ sink に差し替え可能な設計です。
 
 ---
 
 ## Wi-Fi
 
-起動 2 秒後に自動接続を試みます。優先順位:
+起動 2 秒後に自動接続します。優先順位:
 
-1. Flash に保存された資格情報 (`wifi connect` で書いた分)
-2. ビルド時に埋め込まれた `WIFI_SSID` / `WIFI_PASSWORD` (CMake の `-D` で渡す)
-3. どちらもなければ待機。CLI から `wifi connect <ssid> <psk>` で接続すると
-   同時に flash にも保存されます。
+1. Flash 保存済み(`wifi connect` で書いた資格情報)
+2. ビルド時埋め込み `WIFI_SSID` / `WIFI_PASSWORD`
+3. どちらもなければ待機 → CLI から `wifi connect <ssid> <psk>` で接続 + flash 保存
 
-Flash 保存領域はデバイス末尾の 4KB セクタ (2MB フラッシュなら `0x1FF000`) で、
-OTA ステージング領域とは物理的に別です。
-
-ビルド時埋め込み:
+ビルド時埋め込み(開発用):
 
 ```bash
 cmake -S . -B build -DPICO_BOARD=pico_w \
       -DWIFI_SSID=MyAP -DWIFI_PASSWORD=hunter2
 ```
 
-コミット前に `.env` などへ移してください。
+コミット前に定数から `.env` などに移すこと。
 
 ---
 
-## OTA
+## OTA 更新
 
-**フェーズ 1 + 2 実装済**: HTTP でダウンロード → 検証 → ブートローダ経由でスロット切替 → 30 秒無事なら自動 confirm、そうでなければ自動ロールバック。
-
-### パーティション構成 (2MB flash)
-
-```
-0x000000 - 0x003FFF   ( 16 KB)  bootloader
-0x004000 - 0x0C3FFF   (768 KB)  slot A
-0x0C4000 - 0x183FFF   (768 KB)  slot B
-0x184000 - 0x184FFF   (  4 KB)  metadata (active slot, pending flag, hash, ...)
-0x185000 - 0x1FEFFF   (~488 KB) 予約
-0x1FF000 - 0x1FFFFF   (  4 KB)  Wi-Fi 資格情報
-```
-
-ブートローダ・スロット A・スロット B の 3 つは互いに独立したビルドで、それぞれ専用リンカで異なるアドレスに配置します。ソースは全共通、`PICOBLE_SLOT=0/1` の compile define で自身のスロットを識別。
-
-### 初回書き込み
-
-BOOTSEL モードにして 2 ファイル連続でドラッグ:
-
-1. `build/bootloader/picoble_terminal_boot.uf2` (16 KB、0x10000000 起点)
-2. `build/picoble_terminal_a.uf2` (476 KB、0x10004000 起点)
-
-再起動するとブートローダがメタデータを初期化しつつ slot A を起動します。
-
-### 更新 (OTA)
-
-ホストで HTTP サーバを立てる:
-
-```bash
-cd build
-python3 -m http.server 8000
-sha256sum picoble_terminal_a.bin picoble_terminal_b.bin
-```
-
-Pico の CLI から、**現在の staging slot 用の .bin** をダウンロード (`ota status` で確認):
-
-```
-> ota status
-ota status
-  active slot     : A
-  staging slot    : B
-  ...
-
-> ota download http://192.168.11.6:8000/picoble_terminal_b.bin <sha256>
-ota: erasing slot B staging area (~8s, BLE may stall)...
-ota: fetching http://...
-  ..32 KB
-  ..
-ota: NNN bytes staged in slot B
-     sha256 ...
+1. `.bin` をホストで配信
+   ```bash
+   cd build
+   python3 -m http.server 8000
+   sha256sum picoble_terminal_a.bin picoble_terminal_b.bin
+   ```
+2. Pico の CLI で staging slot を確認 → その slot の .bin をダウンロード
+   ```
+   > ota status
+   ...
+     staging slot : B
+   > ota download http://192.168.11.6:8000/picoble_terminal_b.bin <sha256>
+   ...
      verified against expected digest
-ota: staged. Run `ota apply` to reboot into it.
+   > ota apply
+   ota: applying — rebooting into slot B (on probation).
+   ```
+3. 再起動後は slot B が動作、30 秒生存で自動 confirm
+   - `ota confirm` で手動確定も可
+   - probation 中に 3 回リセットが続くとブートローダが自動でロールバック
 
-> ota apply
-ota: applying — rebooting into slot B (on probation).
-```
+**staging slot を間違えない**こと。slot A 実行中に slot A 用の .bin を焼くと
+リンクアドレス不一致で probation 失敗 → ロールバックで救われるが更新は失敗します。
 
-再起動すると slot B が動きます。30 秒経過すると自動的に `ota confirm` が呼ばれ probation が解除されます。手動で確認したいなら:
-
-```
-> ota confirm
-ota: confirmed — no rollback on next boot
-```
-
-### ロールバック
-
-新しいイメージが起動失敗、または `ota confirm` を呼ぶ前に何度もリセットする状況が続くと、ブートローダは自動的に前のスロットに切り戻します(3 回試行後)。文鎮化リスクは大幅に低減されています。
-
-### 制約
-
-- **HTTPS 未対応**。TLS を組むと mbedtls が入って ~200KB 増える。SHA-256 の事前共有前提。
-- **署名検証なし**。イメージ完全性はハッシュ、送信元認証は Wi-Fi の WPA2 に依存。
-- **必ず staging slot 用の .bin を渡すこと**。slot A の実行中に slot A の .bin を渡すと、リンクアドレスが staging slot(B)と合わないためブート後にクラッシュ → 自動ロールバック、で救われますが、無駄な update サイクルを消費します。
-
-### 参考: 手軽なテストサーバ
-
-```bash
-# ホスト側で
-cd build
-python3 -m http.server 8000
-
-# Pico 側で (BLE 経由の CLI から)
-wifi connect MyAP hunter2
-ota status  # staging slot を確認
-ota download http://192.168.11.6:8000/picoble_terminal_<staging>.bin <sha256>
-ota apply
-```
+OTA プロトコルの詳細(メタデータレコード、CRC、apply シーケンス、
+rollback state machine)は [`docs/SPEC.md`](docs/SPEC.md#ota-プロトコル) を参照。
 
 ---
 
