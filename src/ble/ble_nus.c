@@ -228,10 +228,15 @@ static void packet_handler(uint8_t packet_type, uint16_t channel,
             }
             break;
 
-        case HCI_EVENT_LE_META:
-            if (hci_event_le_meta_get_subevent_code(packet) ==
-                HCI_SUBEVENT_LE_CONNECTION_COMPLETE) {
-                g_con_handle = hci_subevent_le_connection_complete_get_connection_handle(packet);
+        case HCI_EVENT_META_GAP:
+            // Pico-SDK's BTStack raises LE connection-complete through
+            // HCI_EVENT_META_GAP / GAP_SUBEVENT_LE_CONNECTION_COMPLETE.
+            // On older BTStack revisions this was HCI_EVENT_LE_META /
+            // HCI_SUBEVENT_LE_CONNECTION_COMPLETE — if a build errors on
+            // the constant names below, that's the migration to make.
+            if (hci_event_gap_meta_get_subevent_code(packet) ==
+                GAP_SUBEVENT_LE_CONNECTION_COMPLETE) {
+                g_con_handle = gap_subevent_le_connection_complete_get_connection_handle(packet);
                 g_notifications_enabled = false;
                 tx_reset();
                 LOGI("ble: connection %u", (unsigned)g_con_handle);

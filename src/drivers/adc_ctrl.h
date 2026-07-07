@@ -5,6 +5,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "pico.h"  // pulls in `uint` typedef
+
 #ifdef __cplusplus
 extern "C" {
 #endif
