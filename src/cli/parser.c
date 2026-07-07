@@ -53,8 +53,13 @@ int cli_parse(char *line, char **argv, int max_argv) {
 
         if (in_quote) return CLI_PARSE_ERR_UNCLOSED_QUOTE;
 
-        // Terminate this token. If we've eaten characters via escape or
-        // quote-stripping, src is ahead of dst — we can safely advance src.
+        // Terminate this token. If we broke on whitespace, dst == src
+        // and the '\0' we're about to write would clobber the very byte
+        // the outer `while (*src)` will check next — the loop would
+        // then exit as if the input ended mid-line. Hop over that byte
+        // first. When we broke on end-of-input (*src == '\0'), src is
+        // already sitting on a terminator; don't run off the end.
+        if (*src) src++;
         *dst++ = '\0';
     }
 
