@@ -54,6 +54,13 @@ void cli_feed(cli_ctx_t *ctx, const uint8_t *data, size_t len);
 // line from a previous session doesn't leak into the next.
 void cli_reset(cli_ctx_t *ctx);
 
+// Feed bytes AND, if the accumulated buffer has content that isn't
+// already newline-terminated, dispatch it. Use this for packet-oriented
+// transports where each incoming datagram is meant as a whole line
+// even if the peer forgot to send a newline (e.g. Bluefruit Connect
+// UART with EOL disabled). Do NOT use for byte streams like USB CDC.
+void cli_feed_line(cli_ctx_t *ctx, const uint8_t *data, size_t len);
+
 // Output helpers usable from command handlers.
 int cli_write(cli_ctx_t *ctx, const char *s);
 int cli_writen(cli_ctx_t *ctx, const char *s, size_t n);

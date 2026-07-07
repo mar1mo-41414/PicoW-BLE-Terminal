@@ -65,7 +65,11 @@ static log_sink_t g_usb_log_sink = {
 
 static void on_ble_rx(const uint8_t *data, size_t n, void *user) {
     (void)user;
-    cli_feed(&g_ble_ctx, data, n);
+    // BLE UART clients like Bluefruit Connect and nRF Toolbox often send
+    // each "Send" as one write with no trailing newline. Treat the packet
+    // boundary as an implicit line end so the shell dispatches regardless
+    // of the client's EOL setting.
+    cli_feed_line(&g_ble_ctx, data, n);
 }
 
 static void on_ble_connect(void *user) {

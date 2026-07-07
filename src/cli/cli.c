@@ -96,6 +96,18 @@ static void dispatch(cli_ctx_t *ctx) {
     write_prompt(ctx);
 }
 
+void cli_feed_line(cli_ctx_t *ctx, const uint8_t *data, size_t len) {
+    if (!ctx) return;
+    cli_feed(ctx, data, len);
+    // If the packet already contained a terminator, line_len is 0 here
+    // and this LF becomes an empty line (skipped in dispatch). If it did
+    // not, this synthesizes the missing line end.
+    if (ctx->line_len > 0) {
+        static const uint8_t lf = '\n';
+        cli_feed(ctx, &lf, 1);
+    }
+}
+
 void cli_feed(cli_ctx_t *ctx, const uint8_t *data, size_t len) {
     if (!ctx || !data) return;
 
