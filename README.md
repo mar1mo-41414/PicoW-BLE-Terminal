@@ -75,8 +75,10 @@ BLE がなくても動作確認できます。
 | `clear` | 画面クリア (ANSI エスケープ) |
 | `gpio <pin> read\|high\|low\|toggle` | GPIO 操作 |
 | `adc <pin> read` | ADC 読み取り (GPIO 26–29) |
-| `system info` | ハードウェア / BLE / uptime |
+| `system info` | ハードウェア / BLE / Wi-Fi / uptime |
 | `uptime` | 起動からの経過時間 |
+| `wifi status\|connect <ssid> <psk>\|forget` | Wi-Fi 状態 / 接続 / 資格情報消去 |
+| `ota status\|download <url> [sha256]\|abort` | OTA イメージのステージング |
 | `reboot` | ウォッチドッグでソフトリセット |
 
 エラー表示は Linux ライクに:
@@ -162,23 +164,85 @@ CLI 出力は `cli_ctx_t.print()` を通るため、
 
 ---
 
-## OTA (未完成 / 設計段階)
+## Wi-Fi
 
-現状は API とパーティション設計のみが入っています。
+起動 2 秒後に自動接続を試みます。優先順位:
 
-- パーティション: `boot` / `slot_a` / `slot_b` / `metadata`
-  (実際のオフセットは `src/ota/ota.c` を参照)
-- API:
-  - `ota_begin(size)`
-  - `ota_write(offset, buf, len)`
-  - `ota_finalize()`
-  - `ota_status()`
-- 将来的に `ota check` / `ota update` コマンドから呼び出す想定。
-- ロールバック: ブート時に `slot_a` を検証し、失敗したら `slot_b` に切り戻す
-  デュアルスロット構成 (詳細は未実装)。
+1. Flash に保存された資格情報 (`wifi connect` で書いた分)
+2. ビルド時に埋め込まれた `WIFI_SSID` / `WIFI_PASSWORD` (CMake の `-D` で渡す)
+3. どちらもなければ待機。CLI から `wifi connect <ssid> <psk>` で接続すると
+   同時に flash にも保存されます。
 
-現段階では `ota` コマンドはステータスを表示し、
-未実装機能へのアクセスは `not implemented` を返します。
+Flash 保存領域はデバイス末尾の 4KB セクタ (2MB フラッシュなら `0x1FF000`) で、
+OTA ステージング領域とは物理的に別です。
+
+ビルド時埋め込み:
+
+```bash
+cmake -S . -B build -DPICO_BOARD=pico_w \
+      -DWIFI_SSID=MyAP -DWIFI_PASSWORD=hunter2
+```
+
+コミット前に `.env` などへ移してください。
+
+---
+
+## OTA
+
+**フェーズ 1 (実装済)**: HTTP でイメージをスロット B にダウンロード + SHA-256 検証まで。
+**フェーズ 2 (未着手)**: 独立ブートローダによるスロット切替 + ロールバック。
+
+### 現状動く範囲
+
+```
+> ota download http://192.168.1.10:8000/firmware.bin  <期待するSHA-256(64桁hex)>
+```
+
+または SHA-256 なしでダウンロード + 計算のみ:
+
+```
+> ota download http://192.168.1.10:8000/firmware.bin
+```
+
+処理の流れ:
+
+1. Wi-Fi 未接続なら失敗。
+2. スロット B (768KB) を全消去 (~8 秒、BLE が一時的に停滞する場合あり)。
+3. HTTP GET でイメージをストリーム受信 → 256B ページごとに flash に書き込み。
+   同時に SHA-256 を計算。
+4. `ota_finalize`: 最終ページを 0xFF パディングして書込、SHA-256 確定。
+5. 期待値が指定されていれば照合、なければ計算値のみ表示。
+
+### パーティション設計
+
+```
+0x000000 - 0x0BFFFF   (768 KB)  slot A  (実行中)
+0x0C0000 - 0x17FFFF   (768 KB)  slot B  (OTA ステージング)
+0x180000 - 0x183FFF   ( 16 KB)  metadata (フェーズ 2 用)
+0x184000 - 0x1FEFFF   (~492 KB) 予約
+0x1FF000 - 0x1FFFFF   (  4 KB)  Wi-Fi 資格情報
+```
+
+### 何ができないか
+
+- **スロット切替はまだ実装されていません**。ステージング領域に書き込んで検証するところまで。
+  実際に新しいイメージから起動するには独立ブートローダ + リンカスクリプトの
+  オフセット化 (0x10004000 起点など) が必要で、フェーズ 2 のスコープです。
+- **HTTPS 未対応**。TLS を組むと mbedtls が入って ~200KB 増える。
+  同一 LAN 内で SHA-256 事前共有する運用を想定しています。
+- **署名検証なし**。イメージ完全性はハッシュ、送信元認証は Wi-Fi の WPA2 に依存。
+
+### 参考: 手軽なテストサーバ
+
+```bash
+# ホスト側で
+cd path/to/uf2
+python3 -m http.server 8000
+
+# Pico 側で (BLE 経由の CLI から)
+wifi connect MyAP hunter2
+ota download http://192.168.1.10:8000/firmware.uf2
+```
 
 ---
 

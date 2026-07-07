@@ -18,7 +18,9 @@
 
 #include "cli/cli.h"
 #include "ble/ble_nus.h"
+#include "network/wifi.h"
 #include "ota/ota.h"
+#include "storage/config.h"
 #include "system/log.h"
 
 #include <stdio.h>
@@ -106,6 +108,48 @@ static void stdio_poll(btstack_timer_source_t *ts) {
     btstack_run_loop_add_timer(ts);
 }
 
+// ---- Wi-Fi auto-connect ----------------------------------------------------
+//
+// Fires a couple of seconds after boot so BTStack has already brought
+// BLE advertising up. Prefers flash-stored credentials; falls back to
+// WIFI_SSID / WIFI_PASSWORD compiled in via -D flags if nothing's
+// saved. If neither is present the user does it manually with
+// `wifi connect ...`.
+
+static btstack_timer_source_t g_wifi_autoconnect_timer;
+
+static void wifi_autoconnect_expired(btstack_timer_source_t *ts) {
+    (void)ts;
+
+    wifi_creds_t creds;
+    bool have = false;
+
+    if (config_load_wifi(&creds)) {
+        LOGI("boot: auto-connect (flash) to %s", creds.ssid);
+        have = true;
+    }
+#if defined(WIFI_SSID) && defined(WIFI_PASSWORD)
+    else {
+        memset(&creds, 0, sizeof(creds));
+        strncpy(creds.ssid, WIFI_SSID,     CONFIG_SSID_MAXLEN);
+        strncpy(creds.psk,  WIFI_PASSWORD, CONFIG_PSK_MAXLEN);
+        LOGI("boot: auto-connect (build-time) to %s", creds.ssid);
+        have = true;
+    }
+#endif
+
+    if (!have) {
+        LOGI("boot: no wifi creds — run `wifi connect <ssid> <psk>`");
+        return;
+    }
+
+    wifi_init();
+    // Blocks up to 15 s. BTStack keeps running from its async_context
+    // worker, so BLE stays advertising and any active connection stays
+    // up while the CYW43 joins the AP.
+    wifi_connect(creds.ssid, creds.psk, 15000);
+}
+
 // ---- entry point -----------------------------------------------------------
 
 int main(void) {
@@ -132,6 +176,13 @@ int main(void) {
     g_stdio_timer.process = stdio_poll;
     btstack_run_loop_set_timer(&g_stdio_timer, 10);
     btstack_run_loop_add_timer(&g_stdio_timer);
+
+    // Kick off Wi-Fi auto-connect 2 s after boot — by then BTStack is
+    // through HCI bring-up and BLE is advertising, so the join blocking
+    // doesn't stall discovery.
+    g_wifi_autoconnect_timer.process = wifi_autoconnect_expired;
+    btstack_run_loop_set_timer(&g_wifi_autoconnect_timer, 2000);
+    btstack_run_loop_add_timer(&g_wifi_autoconnect_timer);
 
     btstack_run_loop_execute();
     return 0;  // unreachable

@@ -2,6 +2,7 @@
 #include "system/version.h"
 #include "system/uptime.h"
 #include "ble/ble_nus.h"
+#include "network/wifi.h"
 
 #include "pico/version.h"
 #include "hardware/clocks.h"
@@ -49,6 +50,14 @@ void sysinfo_print(cli_ctx_t *ctx) {
 
     print_kv(ctx, "BLE",
              ble_nus_is_connected() ? "connected" : "advertising");
+
+    if (wifi_is_connected()) {
+        char ip[24];
+        wifi_format_ip(ip, sizeof(ip));
+        cli_printf(ctx, "  %-14s : connected (%s)\r\n", "Wi-Fi", ip);
+    } else {
+        print_kv(ctx, "Wi-Fi", "disconnected");
+    }
 
     char up[32];
     uptime_format(up, sizeof(up));

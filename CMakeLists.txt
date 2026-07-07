@@ -38,10 +38,22 @@ add_executable(${APP_TARGET}
     src/system/log.c
     src/system/uptime.c
     src/system/sysinfo.c
+    src/system/sha256.c
     src/drivers/gpio_ctrl.c
     src/drivers/adc_ctrl.c
     src/ota/ota.c
+    src/storage/config.c
+    src/network/wifi.c
+    src/network/http_get.c
 )
+
+# Optional build-time Wi-Fi fallback (used only if no flash-saved creds).
+if (DEFINED WIFI_SSID)
+    target_compile_definitions(${APP_TARGET} PRIVATE WIFI_SSID="${WIFI_SSID}")
+endif ()
+if (DEFINED WIFI_PASSWORD)
+    target_compile_definitions(${APP_TARGET} PRIVATE WIFI_PASSWORD="${WIFI_PASSWORD}")
+endif ()
 
 target_include_directories(${APP_TARGET} PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/include
@@ -58,13 +70,17 @@ target_link_libraries(${APP_TARGET} PRIVATE
     pico_stdlib
     pico_btstack_ble
     pico_btstack_cyw43
-    pico_cyw43_arch_none
+    # Wi-Fi + BT coexist: the lwip_threadsafe_background arch drives LwIP
+    # from an async_context worker, freeing us from polling in the main
+    # loop while still letting BTStack use its own run loop.
+    pico_cyw43_arch_lwip_threadsafe_background
     hardware_adc
     hardware_gpio
     hardware_watchdog
     hardware_clocks
     hardware_flash
     hardware_sync
+    pico_flash
 )
 
 # stdio: USB CDC on for local debug, UART off (BLE is the primary console).
