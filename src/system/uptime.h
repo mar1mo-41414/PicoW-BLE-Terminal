@@ -2,6 +2,7 @@
 #ifndef PICOBLE_SYSTEM_UPTIME_H
 #define PICOBLE_SYSTEM_UPTIME_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus

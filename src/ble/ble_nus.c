@@ -61,7 +61,7 @@ static const uint8_t g_adv_data[] = {
 // UUID string 6E400001-B5A3-F393-E0A9-E50E24DCCA9E reversed to LE:
 //   9E CA DC 24 0E E5 A9 E0 93 F3 A3 B5 01 00 40 6E
 static const uint8_t g_scan_resp[] = {
-    0x11, BLUETOOTH_DATA_TYPE_COMPLETE_LIST_OF_128BIT_SERVICE_CLASS_UUIDS,
+    0x11, BLUETOOTH_DATA_TYPE_COMPLETE_LIST_OF_128_BIT_SERVICE_CLASS_UUIDS,
     0x9E, 0xCA, 0xDC, 0x24, 0x0E, 0xE5, 0xA9, 0xE0,
     0x93, 0xF3, 0xA3, 0xB5, 0x01, 0x00, 0x40, 0x6E,
 };
