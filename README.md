@@ -189,59 +189,92 @@ cmake -S . -B build -DPICO_BOARD=pico_w \
 
 ## OTA
 
-**フェーズ 1 (実装済)**: HTTP でイメージをスロット B にダウンロード + SHA-256 検証まで。
-**フェーズ 2 (未着手)**: 独立ブートローダによるスロット切替 + ロールバック。
+**フェーズ 1 + 2 実装済**: HTTP でダウンロード → 検証 → ブートローダ経由でスロット切替 → 30 秒無事なら自動 confirm、そうでなければ自動ロールバック。
 
-### 現状動く範囲
-
-```
-> ota download http://192.168.1.10:8000/firmware.bin  <期待するSHA-256(64桁hex)>
-```
-
-または SHA-256 なしでダウンロード + 計算のみ:
+### パーティション構成 (2MB flash)
 
 ```
-> ota download http://192.168.1.10:8000/firmware.bin
-```
-
-処理の流れ:
-
-1. Wi-Fi 未接続なら失敗。
-2. スロット B (768KB) を全消去 (~8 秒、BLE が一時的に停滞する場合あり)。
-3. HTTP GET でイメージをストリーム受信 → 256B ページごとに flash に書き込み。
-   同時に SHA-256 を計算。
-4. `ota_finalize`: 最終ページを 0xFF パディングして書込、SHA-256 確定。
-5. 期待値が指定されていれば照合、なければ計算値のみ表示。
-
-### パーティション設計
-
-```
-0x000000 - 0x0BFFFF   (768 KB)  slot A  (実行中)
-0x0C0000 - 0x17FFFF   (768 KB)  slot B  (OTA ステージング)
-0x180000 - 0x183FFF   ( 16 KB)  metadata (フェーズ 2 用)
-0x184000 - 0x1FEFFF   (~492 KB) 予約
+0x000000 - 0x003FFF   ( 16 KB)  bootloader
+0x004000 - 0x0C3FFF   (768 KB)  slot A
+0x0C4000 - 0x183FFF   (768 KB)  slot B
+0x184000 - 0x184FFF   (  4 KB)  metadata (active slot, pending flag, hash, ...)
+0x185000 - 0x1FEFFF   (~488 KB) 予約
 0x1FF000 - 0x1FFFFF   (  4 KB)  Wi-Fi 資格情報
 ```
 
-### 何ができないか
+ブートローダ・スロット A・スロット B の 3 つは互いに独立したビルドで、それぞれ専用リンカで異なるアドレスに配置します。ソースは全共通、`PICOBLE_SLOT=0/1` の compile define で自身のスロットを識別。
 
-- **スロット切替はまだ実装されていません**。ステージング領域に書き込んで検証するところまで。
-  実際に新しいイメージから起動するには独立ブートローダ + リンカスクリプトの
-  オフセット化 (0x10004000 起点など) が必要で、フェーズ 2 のスコープです。
-- **HTTPS 未対応**。TLS を組むと mbedtls が入って ~200KB 増える。
-  同一 LAN 内で SHA-256 事前共有する運用を想定しています。
+### 初回書き込み
+
+BOOTSEL モードにして 2 ファイル連続でドラッグ:
+
+1. `build/bootloader/picoble_terminal_boot.uf2` (16 KB、0x10000000 起点)
+2. `build/picoble_terminal_a.uf2` (476 KB、0x10004000 起点)
+
+再起動するとブートローダがメタデータを初期化しつつ slot A を起動します。
+
+### 更新 (OTA)
+
+ホストで HTTP サーバを立てる:
+
+```bash
+cd build
+python3 -m http.server 8000
+sha256sum picoble_terminal_a.bin picoble_terminal_b.bin
+```
+
+Pico の CLI から、**現在の staging slot 用の .bin** をダウンロード (`ota status` で確認):
+
+```
+> ota status
+ota status
+  active slot     : A
+  staging slot    : B
+  ...
+
+> ota download http://192.168.11.6:8000/picoble_terminal_b.bin <sha256>
+ota: erasing slot B staging area (~8s, BLE may stall)...
+ota: fetching http://...
+  ..32 KB
+  ..
+ota: NNN bytes staged in slot B
+     sha256 ...
+     verified against expected digest
+ota: staged. Run `ota apply` to reboot into it.
+
+> ota apply
+ota: applying — rebooting into slot B (on probation).
+```
+
+再起動すると slot B が動きます。30 秒経過すると自動的に `ota confirm` が呼ばれ probation が解除されます。手動で確認したいなら:
+
+```
+> ota confirm
+ota: confirmed — no rollback on next boot
+```
+
+### ロールバック
+
+新しいイメージが起動失敗、または `ota confirm` を呼ぶ前に何度もリセットする状況が続くと、ブートローダは自動的に前のスロットに切り戻します(3 回試行後)。文鎮化リスクは大幅に低減されています。
+
+### 制約
+
+- **HTTPS 未対応**。TLS を組むと mbedtls が入って ~200KB 増える。SHA-256 の事前共有前提。
 - **署名検証なし**。イメージ完全性はハッシュ、送信元認証は Wi-Fi の WPA2 に依存。
+- **必ず staging slot 用の .bin を渡すこと**。slot A の実行中に slot A の .bin を渡すと、リンクアドレスが staging slot(B)と合わないためブート後にクラッシュ → 自動ロールバック、で救われますが、無駄な update サイクルを消費します。
 
 ### 参考: 手軽なテストサーバ
 
 ```bash
 # ホスト側で
-cd path/to/uf2
+cd build
 python3 -m http.server 8000
 
 # Pico 側で (BLE 経由の CLI から)
 wifi connect MyAP hunter2
-ota download http://192.168.1.10:8000/firmware.uf2
+ota status  # staging slot を確認
+ota download http://192.168.11.6:8000/picoble_terminal_<staging>.bin <sha256>
+ota apply
 ```
 
 ---

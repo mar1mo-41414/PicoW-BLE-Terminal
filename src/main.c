@@ -124,6 +124,20 @@ static void net_poll_expired(btstack_timer_source_t *ts) {
     btstack_run_loop_add_timer(ts);
 }
 
+// --- OTA auto-confirm --------------------------------------------------------
+//
+// The bootloader marks a freshly applied image as pending_verify. If
+// we survive 30 s of runtime without a crash, we call ota_confirm()
+// so the bootloader stops incrementing boot_attempts. Users can also
+// invoke `ota confirm` manually at any point.
+
+static btstack_timer_source_t g_ota_confirm_timer;
+
+static void ota_auto_confirm(btstack_timer_source_t *ts) {
+    (void)ts;
+    ota_confirm();
+}
+
 // ---- Wi-Fi auto-connect ----------------------------------------------------
 //
 // Fires a couple of seconds after boot so BTStack has already brought
@@ -205,6 +219,11 @@ int main(void) {
     g_wifi_autoconnect_timer.process = wifi_autoconnect_expired;
     btstack_run_loop_set_timer(&g_wifi_autoconnect_timer, 2000);
     btstack_run_loop_add_timer(&g_wifi_autoconnect_timer);
+
+    // OTA auto-confirm 30 s after boot.
+    g_ota_confirm_timer.process = ota_auto_confirm;
+    btstack_run_loop_set_timer(&g_ota_confirm_timer, 30000);
+    btstack_run_loop_add_timer(&g_ota_confirm_timer);
 
     btstack_run_loop_execute();
     return 0;  // unreachable
