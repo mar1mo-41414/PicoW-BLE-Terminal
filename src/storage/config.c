@@ -10,6 +10,7 @@
 #include "hardware/flash.h"
 #include "hardware/sync.h"
 #include "pico/flash.h"
+#include "pico_ota/crc32.h"    // shared with the OTA framework
 
 #include <string.h>
 
@@ -36,20 +37,8 @@ typedef struct {
 _Static_assert(sizeof(config_record_t) <= FLASH_PAGE_SIZE,
                "config record must fit in one 256-byte flash page");
 
-// Standard CRC-32 (IEEE polynomial). Small table-free implementation —
-// we only compute over ~100 bytes so speed doesn't matter.
-static uint32_t crc32_ieee(const void *data, size_t len) {
-    const uint8_t *p = data;
-    uint32_t crc = 0xFFFFFFFFu;
-    while (len--) {
-        crc ^= *p++;
-        for (int i = 0; i < 8; i++) {
-            uint32_t mask = -(int32_t)(crc & 1u);
-            crc = (crc >> 1) ^ (0xEDB88320u & mask);
-        }
-    }
-    return ~crc;
-}
+// CRC-32 comes from pico_ota_crc32() — same polynomial as the OTA
+// metadata block, so this project has exactly one implementation.
 
 // ---- read path -------------------------------------------------------------
 
@@ -66,7 +55,7 @@ bool config_load_wifi(wifi_creds_t *out) {
 
     uint32_t want = rec.crc32;
     rec.crc32 = 0;
-    if (crc32_ieee(&rec, sizeof(rec) - sizeof(uint32_t)) != want) return false;
+    if (pico_ota_crc32(&rec, sizeof(rec) - sizeof(uint32_t)) != want) return false;
 
     // Enforce NUL-termination even in the presence of a corrupted record
     // that passed CRC by accident — belt and braces.
@@ -139,7 +128,7 @@ bool config_save_wifi(const wifi_creds_t *creds) {
     memcpy(rec.ssid, creds->ssid, ssid_len);
     memcpy(rec.psk,  creds->psk,  psk_len);
     rec.crc32 = 0;
-    rec.crc32 = crc32_ieee(&rec, sizeof(rec) - sizeof(uint32_t));
+    rec.crc32 = pico_ota_crc32(&rec, sizeof(rec) - sizeof(uint32_t));
 
     return write_record(&rec);
 }

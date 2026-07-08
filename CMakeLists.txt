@@ -1,8 +1,9 @@
 # PicoBLE-Terminal — BLE UART CLI firmware for Raspberry Pi Pico W.
 #
-# Phase 2 layout: one small bootloader at 0x10000000 and two identical
-# copies of the application relinked for slot A (0x10004000) and slot
-# B (0x100C4000). All three are produced as separate .uf2 files.
+# The dual-slot OTA infrastructure (bootloader, linker scripts, ota API,
+# metadata / crc32 / sha256) lives in picow-ota/ as a reusable framework.
+# This file wires the framework into two application builds — one for
+# each slot — and drops the framework's bootloader UF2 into the tree.
 cmake_minimum_required(VERSION 3.13)
 
 set(PICO_BOARD pico_w CACHE STRING "Board type")
@@ -18,6 +19,9 @@ pico_sdk_init()
 if (NOT PICO_CYW43_SUPPORTED)
     message(FATAL_ERROR "This project requires a Pico W (or Pico 2 W) board with CYW43 wireless support.")
 endif ()
+
+# --- OTA framework (provides pico_ota + pico_ota_bootloader) ----------------
+add_subdirectory(picow-ota)
 
 # --- App sources -------------------------------------------------------------
 
@@ -35,21 +39,14 @@ set(APP_SOURCES
     src/system/log.c
     src/system/uptime.c
     src/system/sysinfo.c
-    src/system/sha256.c
     src/drivers/gpio_ctrl.c
     src/drivers/adc_ctrl.c
-    src/ota/ota.c
     src/storage/config.c
     src/network/wifi.c
     src/network/http_get.c
 )
 
 # --- Per-slot app target -----------------------------------------------------
-#
-# Same source, two builds. Every literal address the compiler emits
-# is baked in at link time — the two binaries are therefore NOT
-# interchangeable. The bootloader picks whichever slot's UF2 the user
-# most recently downloaded, so we always produce both.
 
 function(add_app_slot slot_letter slot_id)
     set(TARGET picoble_terminal_${slot_letter})
@@ -61,9 +58,6 @@ function(add_app_slot slot_letter slot_id)
         ${CMAKE_CURRENT_LIST_DIR}/src
     )
 
-    target_compile_definitions(${TARGET} PRIVATE
-        PICOBLE_SLOT=${slot_id}
-    )
     if (DEFINED WIFI_SSID)
         target_compile_definitions(${TARGET} PRIVATE WIFI_SSID="${WIFI_SSID}")
     endif ()
@@ -87,11 +81,11 @@ function(add_app_slot slot_letter slot_id)
         hardware_flash
         hardware_sync
         pico_flash
+        pico_ota
     )
 
-    pico_set_linker_script(${TARGET}
-        "${CMAKE_CURRENT_LIST_DIR}/linker/memmap_app_slot_${slot_letter}.ld"
-    )
+    # The framework's helper sets the linker script + PICO_OTA_SLOT.
+    pico_ota_set_slot(${TARGET} ${slot_id})
 
     pico_enable_stdio_usb(${TARGET} 1)
     pico_enable_stdio_uart(${TARGET} 0)
@@ -101,7 +95,3 @@ endfunction()
 
 add_app_slot(a 0)
 add_app_slot(b 1)
-
-# --- Bootloader --------------------------------------------------------------
-
-add_subdirectory(bootloader)

@@ -58,7 +58,8 @@ static void write_prompt(cli_ctx_t *ctx) {
 
 void cli_greet(cli_ctx_t *ctx) {
     cli_reset(ctx);
-    cli_printf(ctx, "\r\nPicoBLE Terminal %s\r\n", PICOBLE_FW_VERSION);
+    cli_printf(ctx, "\r\nPicoBLE Terminal %s  [slot %c]\r\n",
+               PICOBLE_FW_VERSION, 'A' + (PICO_OTA_SLOT & 1));
     cli_write(ctx, "Type \"help\"\r\n\r\n");
     write_prompt(ctx);
 }

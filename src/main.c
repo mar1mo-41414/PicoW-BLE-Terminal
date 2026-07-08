@@ -20,11 +20,13 @@
 #include "cli/cli.h"
 #include "ble/ble_nus.h"
 #include "network/wifi.h"
-#include "ota/ota.h"
+#include "pico_ota/ota.h"
+#include "pico_ota/log.h"
 #include "storage/config.h"
 #include "system/log.h"
 
 #include <stdio.h>
+#include <stdarg.h>
 #include <string.h>
 
 // ---- shells -----------------------------------------------------------------
@@ -63,6 +65,27 @@ static log_sink_t g_usb_log_sink = {
     .user  = NULL,
     ._next = NULL,
 };
+
+// --- pico-ota log adapter ---------------------------------------------------
+//
+// The framework declares pico_ota_log_{info,warn,error} as weak. These
+// strong definitions route them into this app's log subsystem so we get
+// consistent per-level formatting on USB CDC without the framework
+// needing to know anything about it.
+
+static void ota_log_route(log_level_t lvl, const char *fmt, va_list ap) {
+    log_vwrite(lvl, fmt, ap);
+}
+
+void pico_ota_log_info(const char *fmt, ...) {
+    va_list ap; va_start(ap, fmt); ota_log_route(LOG_LEVEL_INFO,  fmt, ap); va_end(ap);
+}
+void pico_ota_log_warn(const char *fmt, ...) {
+    va_list ap; va_start(ap, fmt); ota_log_route(LOG_LEVEL_WARN,  fmt, ap); va_end(ap);
+}
+void pico_ota_log_error(const char *fmt, ...) {
+    va_list ap; va_start(ap, fmt); ota_log_route(LOG_LEVEL_ERROR, fmt, ap); va_end(ap);
+}
 
 // ---- BLE callbacks ---------------------------------------------------------
 

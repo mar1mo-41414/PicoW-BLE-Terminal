@@ -1,4 +1,4 @@
-// PicoBLE-Terminal bootloader.
+// pico-ota bootloader — reads metadata, picks a slot, jumps into it.
 //
 // Executes at 0x10000000 with its own boot2. Decides which application
 // slot to run based on the metadata block written by the application's
@@ -19,7 +19,8 @@
 #include "hardware/sync.h"
 #include "hardware/watchdog.h"
 
-#include "ota_metadata.h"
+#include "pico_ota/metadata.h"
+#include "pico_ota/crc32.h"
 
 #include <string.h>
 
@@ -28,22 +29,6 @@ static const volatile ota_metadata_t *xip_meta =
     (const volatile ota_metadata_t *)(XIP_BASE + OTA_METADATA_OFFSET);
 
 #define VTOR_ADDR   0xE000ED08UL
-
-// ---- CRC-32/IEEE — same polynomial the app uses in storage/config.c and ota.c
-// so both sides agree bit-for-bit on record validity.
-
-static uint32_t crc32_ieee(const void *data, size_t len) {
-    const uint8_t *p = data;
-    uint32_t crc = 0xFFFFFFFFu;
-    while (len--) {
-        crc ^= *p++;
-        for (int i = 0; i < 8; i++) {
-            uint32_t mask = -(int32_t)(crc & 1u);
-            crc = (crc >> 1) ^ (0xEDB88320u & mask);
-        }
-    }
-    return ~crc;
-}
 
 // ---- metadata --------------------------------------------------------------
 
@@ -54,12 +39,12 @@ static bool read_metadata(ota_metadata_t *out) {
     if (out->version != OTA_META_VERSION) return false;
     uint32_t expected = out->crc32;
     out->crc32 = 0;
-    return crc32_ieee(out, sizeof(*out) - sizeof(uint32_t)) == expected;
+    return pico_ota_crc32(out, sizeof(*out) - sizeof(uint32_t)) == expected;
 }
 
 static void write_metadata(ota_metadata_t *m) {
     m->crc32 = 0;
-    m->crc32 = crc32_ieee(m, sizeof(*m) - sizeof(uint32_t));
+    m->crc32 = pico_ota_crc32(m, sizeof(*m) - sizeof(uint32_t));
 
     uint8_t page[FLASH_PAGE_SIZE];
     memset(page, 0xFF, sizeof(page));

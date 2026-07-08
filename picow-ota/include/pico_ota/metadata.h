@@ -9,8 +9,8 @@
 // Layout is *identical* on both sides; this header is the single
 // source of truth. Do not add fields in the middle — only append,
 // bump OTA_META_VERSION, and be prepared to migrate older records.
-#ifndef PICOBLE_OTA_METADATA_H
-#define PICOBLE_OTA_METADATA_H
+#ifndef PICO_OTA_METADATA_H
+#define PICO_OTA_METADATA_H
 
 #include <stdint.h>
 
@@ -52,4 +52,4 @@ typedef struct {
 _Static_assert(sizeof(ota_metadata_t) <= 256,
                "OTA metadata must fit in a single 256-byte flash page");
 
-#endif  // PICOBLE_OTA_METADATA_H
+#endif  // PICO_OTA_METADATA_H

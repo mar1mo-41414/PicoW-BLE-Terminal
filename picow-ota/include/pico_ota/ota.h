@@ -1,21 +1,24 @@
-// OTA update subsystem — Phase 2 (bootloader-backed slot switching).
+// pico-ota — application-side OTA API.
 //
 // The application always runs from either slot A or slot B. Which slot
-// is active is decided at boot time by the bootloader based on the
-// metadata block written here. New images are streamed into the
-// *staging* slot (whichever the running slot isn't) and, on
+// is active is decided at boot time by the pico-ota bootloader based on
+// the metadata block written by this API. New images are streamed into
+// the *staging* slot (whichever the running slot isn't) and, on
 // ota_apply(), the metadata is rewritten to swap active_slot and mark
 // the freshly-staged image as "pending verification". The bootloader
 // gives the pending image OTA_MAX_BOOT_ATTEMPTS chances to call
 // ota_confirm() before rolling back automatically.
 //
-// The shared flash layout and metadata schema live in
-// include/ota_metadata.h.
-#ifndef PICOBLE_OTA_H
-#define PICOBLE_OTA_H
+// The framework identifies the running slot at compile time via
+// PICO_OTA_SLOT (0=A, 1=B); the pico_ota_set_slot() CMake helper sets
+// this per-build.
+//
+// Shared flash layout and metadata schema live in pico_ota/metadata.h.
+#ifndef PICO_OTA_H
+#define PICO_OTA_H
 
-#include "ota_metadata.h"
-#include "system/sha256.h"
+#include "pico_ota/metadata.h"
+#include "pico_ota/sha256.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -49,7 +52,7 @@ typedef struct {
     uint8_t  computed_sha256[SHA256_DIGEST_LEN];
 } ota_status_t;
 
-// Read metadata + reconcile with PICOBLE_SLOT (compile-time slot id).
+// Read metadata + reconcile with PICO_OTA_SLOT (compile-time slot id).
 // On first boot after a fresh flash where no metadata exists, this
 // commits a first-time record. Must be called from main() before any
 // other ota_* function.
@@ -90,4 +93,4 @@ ota_result_t ota_verify(const uint8_t expected[SHA256_DIGEST_LEN]);
 }
 #endif
 
-#endif  // PICOBLE_OTA_H
+#endif  // PICO_OTA_H

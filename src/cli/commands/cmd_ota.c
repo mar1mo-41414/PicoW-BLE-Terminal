@@ -5,11 +5,11 @@
 // `ota abort`                          — discard an in-flight update.
 #include "cli/cli.h"
 #include "cli/command.h"
-#include "ota/ota.h"
+#include "pico_ota/ota.h"
+#include "pico_ota/sha256.h"
 #include "network/http_get.h"
 #include "network/wifi.h"
 #include "storage/config.h"
-#include "system/sha256.h"
 
 #include <string.h>
 

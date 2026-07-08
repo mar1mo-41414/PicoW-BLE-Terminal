@@ -4,8 +4,8 @@
 // expected digest passed on the command line. Not authenticated (no
 // HMAC/signature) — anyone who can serve the download URL controls the
 // image. For real deployments layer an out-of-band signature on top.
-#ifndef PICOBLE_SYSTEM_SHA256_H
-#define PICOBLE_SYSTEM_SHA256_H
+#ifndef PICO_OTA_SHA256_H
+#define PICO_OTA_SHA256_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -46,4 +46,4 @@ void sha256_format_hex(const uint8_t in[SHA256_DIGEST_LEN], char *buf);
 }
 #endif
 
-#endif  // PICOBLE_SYSTEM_SHA256_H
+#endif  // PICO_OTA_SHA256_H

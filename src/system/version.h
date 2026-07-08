@@ -3,7 +3,7 @@
 #ifndef PICOBLE_SYSTEM_VERSION_H
 #define PICOBLE_SYSTEM_VERSION_H
 
-#define PICOBLE_FW_VERSION "v0.1.1"
+#define PICOBLE_FW_VERSION "v0.1.2"
 
 // __DATE__ / __TIME__ are captured at translation time — build systems
 // that want reproducible builds can override SOURCE_DATE_EPOCH.

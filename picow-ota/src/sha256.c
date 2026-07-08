@@ -1,6 +1,6 @@
 // FIPS 180-4 SHA-256. Public-domain style transcription — buffered
 // streaming API sized for our OTA workload (chunks up to a few KB).
-#include "system/sha256.h"
+#include "pico_ota/sha256.h"
 
 #include <string.h>
 

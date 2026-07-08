@@ -43,7 +43,7 @@ cmake --build build -j
 
 | ファイル | 用途 |
 |---|---|
-| `build/bootloader/picoble_terminal_boot.uf2` | ブートローダ (0x10000000 起点、16 KB) |
+| `build/picow-ota/bootloader/pico_ota_bootloader.uf2` | ブートローダ (0x10000000 起点、16 KB) |
 | `build/picoble_terminal_a.uf2` | slot A アプリ (0x10004000 起点、768 KB 枠) |
 | `build/picoble_terminal_b.uf2` | slot B アプリ (0x100C4000 起点、768 KB 枠) |
 
@@ -58,7 +58,7 @@ Pico 2 W (RP2350) の場合: `-DPICO_BOARD=pico2_w`(未検証、要動作確認)
 Pico を BOOTSEL(BOOTSEL ボタンを押しながら USB 接続)にし、
 以下の 2 つを順にドラッグ&ドロップ:
 
-1. `build/bootloader/picoble_terminal_boot.uf2`
+1. `build/picow-ota/bootloader/pico_ota_bootloader.uf2`
 2. `build/picoble_terminal_a.uf2`
 
 再起動するとブートローダがメタデータを初期化して slot A を起動します。
@@ -76,7 +76,7 @@ BOOTSEL 経由の再書き込みは不要です。
 3. 接続直後にプロンプトが送られてきます:
 
 ```
-PicoBLE Terminal v0.1.1
+PicoBLE Terminal v0.1.2
 Type "help"
 
 >
@@ -158,46 +158,45 @@ cmake --build build -j
 ## ディレクトリ構成
 
 ```
-bootloader/                独立ブートローダ (別 CMake target)
-  main.c                   スロット選択・ロールバック判定・ジャンプ
-  CMakeLists.txt
-linker/                    3 種類の memmap_*.ld
-  memmap_bootloader.ld     0x10000000 / 16 KB
-  memmap_app_slot_a.ld     0x10004000 / 768 KB
-  memmap_app_slot_b.ld     0x100C4000 / 768 KB
+picow-ota/                  OTA フレームワーク (別プロジェクト扱い)
+  README.md
+  CMakeLists.txt            pico_ota / pico_ota_metadata / helper
+  bootloader/               独立ブートローダターゲット
+  linker/                   3 種類の memmap_*.ld
+  include/pico_ota/         公開ヘッダ (metadata / ota / sha256 / crc32 / log)
+  src/                      ota.c / sha256.c / crc32.c / log_default.c
 include/
-  btstack_config.h         BTStack のアプリ側設定
-  lwipopts.h               LwIP のアプリ側設定
-  ota_metadata.h           ブートローダとアプリの共有 struct
+  btstack_config.h          BTStack のアプリ側設定
+  lwipopts.h                LwIP のアプリ側設定
 docs/
-  SPEC.md                  実装仕様書 (拡張ポイント / 契約 / 内部設計)
-  ROADMAP.md               将来の機能案
+  SPEC.md                   実装仕様書 (拡張ポイント / 契約 / 内部設計)
+  ROADMAP.md                将来の機能案
 src/
-  main.c                   起動 / メインループ / タイマ配線
+  main.c                    起動 / メインループ / タイマ配線 + pico_ota ロガー
   cli/
-    cli.c                  行受信 → プロンプト → ディスパッチ
-    parser.c               空白 / ダブルクォート引数パーサ
-    command.c              コマンドレジストリ (自動登録)
-    commands/              各コマンドの実装 (← ここに追加)
+    cli.c                   行受信 → プロンプト → ディスパッチ
+    parser.c                空白 / ダブルクォート引数パーサ
+    command.c               コマンドレジストリ (自動登録)
+    commands/               各コマンドの実装 (← ここに追加)
   ble/
-    ble_nus.c              Nordic UART Service + アドバタイズ
-    nus.gatt               GATT データベース定義
+    ble_nus.c               Nordic UART Service + アドバタイズ
+    nus.gatt                GATT データベース定義
   system/
-    log.c                  sink 抽象化
-    uptime.c               起動時刻
-    sysinfo.c              system info の実装本体
-    sha256.c               自前 SHA-256
-  drivers/                 ペリフェラルドライバ薄ラッパ (← 追加はここへ)
+    log.c                   sink 抽象化
+    uptime.c                起動時刻
+    sysinfo.c               system info の実装本体
+    version.h               PICOBLE_FW_VERSION 定数
+  drivers/                  ペリフェラルドライバ薄ラッパ (← 追加はここへ)
     gpio_ctrl.c
     adc_ctrl.c
-  ota/
-    ota.c                  ステージング + メタデータ + apply/confirm
   network/
-    wifi.c                 STA 接続
-    http_get.c             LwIP raw TCP HTTP クライアント
+    wifi.c                  STA 接続
+    http_get.c              LwIP raw TCP HTTP クライアント
   storage/
-    config.c               flash セクタ内 KV
+    config.c                flash セクタ内 KV (pico_ota_crc32 を共有)
 ```
+
+OTA フレームワークの詳細は [`picow-ota/README.md`](picow-ota/README.md) を参照。
 
 ---
 

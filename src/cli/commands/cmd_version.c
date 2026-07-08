@@ -10,7 +10,10 @@
 
 static int handle(int argc, char **argv, cli_ctx_t *ctx) {
     (void)argc; (void)argv;
-    cli_printf(ctx, "PicoBLE Terminal %s\r\n", PICOBLE_FW_VERSION);
+    // The slot letter is baked in per-slot build via -DPICO_OTA_SLOT;
+    // seeing it here (and in the greeting) confirms which slot booted.
+    cli_printf(ctx, "PicoBLE Terminal %s  [slot %c]\r\n",
+               PICOBLE_FW_VERSION, 'A' + (PICO_OTA_SLOT & 1));
     cli_printf(ctx, "Pico SDK %s\r\n", PICO_SDK_VERSION_STRING);
     cli_printf(ctx, "Built %s\r\n", PICOBLE_BUILD_DATE);
     return CLI_OK;

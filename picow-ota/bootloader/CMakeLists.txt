@@ -1,15 +1,9 @@
-# PicoBLE-Terminal bootloader — standalone target, produces its own UF2.
-# Kept as narrow as possible (no stdio, no cyw43) so it fits well inside
-# the 16 KB reserved at the head of flash.
+# pico-ota bootloader — the small executable that lives at 0x10000000
+# with its own boot2 and dispatches to the currently-active slot.
 
-set(BOOT_TARGET picoble_terminal_boot)
+set(BOOT_TARGET pico_ota_bootloader)
 
 add_executable(${BOOT_TARGET} main.c)
-
-target_include_directories(${BOOT_TARGET} PRIVATE
-    ${CMAKE_CURRENT_LIST_DIR}
-    ${CMAKE_CURRENT_LIST_DIR}/../include
-)
 
 target_link_libraries(${BOOT_TARGET} PRIVATE
     pico_stdlib
@@ -17,12 +11,14 @@ target_link_libraries(${BOOT_TARGET} PRIVATE
     hardware_flash
     hardware_sync
     hardware_watchdog
+    pico_ota_metadata
 )
 
 pico_set_linker_script(${BOOT_TARGET}
     "${CMAKE_CURRENT_LIST_DIR}/../linker/memmap_bootloader.ld"
 )
 
+# No shell, no logging — bootloader is silent.
 pico_enable_stdio_usb(${BOOT_TARGET} 0)
 pico_enable_stdio_uart(${BOOT_TARGET} 0)
 
