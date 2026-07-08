@@ -15,6 +15,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdarg.h>
+#include <stdbool.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -26,6 +27,11 @@ typedef int (*cli_output_fn)(const char *data, size_t len, void *user);
 
 #define CLI_LINE_MAX 256
 
+// Forward — the capture callback receives whole lines when a command
+// has put the shell into multi-line capture mode (e.g. `script save`).
+struct cli_ctx;
+typedef void (*cli_capture_fn)(struct cli_ctx *ctx, const char *line);
+
 typedef struct cli_ctx {
     cli_output_fn out;
     void         *user;
@@ -33,32 +39,31 @@ typedef struct cli_ctx {
     char   line[CLI_LINE_MAX];
     size_t line_len;
 
-    // If the last byte we consumed was CR, swallow a following LF so a
-    // CRLF pair fires the command once, not twice.
     unsigned last_was_cr : 1;
+
+    // Multi-line capture (heredoc). When non-NULL, incoming lines go
+    // to this callback instead of the normal command dispatcher. The
+    // callback ends the capture by calling cli_capture_end(ctx).
+    cli_capture_fn capture_cb;
 } cli_ctx_t;
 
 // Initialize a context. `out` is invoked whenever the CLI has bytes to
 // send; if NULL the CLI silently drops output.
 void cli_init(cli_ctx_t *ctx, cli_output_fn out, void *user);
 
-// Emit the banner and first prompt. Call after the transport is up
-// (e.g. right after a BLE connection is established).
+// Emit the banner and first prompt.
 void cli_greet(cli_ctx_t *ctx);
 
 // Feed received bytes. Multiple lines in a single buffer are OK; the CLI
 // splits on LF and tolerates CR (both bare CR and CRLF).
 void cli_feed(cli_ctx_t *ctx, const uint8_t *data, size_t len);
 
-// Reset accumulated line state — call on disconnect so a half-typed
-// line from a previous session doesn't leak into the next.
+// Reset accumulated line state and clear any capture mode.
 void cli_reset(cli_ctx_t *ctx);
 
-// Feed bytes AND, if the accumulated buffer has content that isn't
-// already newline-terminated, dispatch it. Use this for packet-oriented
-// transports where each incoming datagram is meant as a whole line
-// even if the peer forgot to send a newline (e.g. Bluefruit Connect
-// UART with EOL disabled). Do NOT use for byte streams like USB CDC.
+// Feed AND, if the accumulated buffer has content that isn't
+// newline-terminated, dispatch it. Use this for packet-oriented
+// transports like BLE UART.
 void cli_feed_line(cli_ctx_t *ctx, const uint8_t *data, size_t len);
 
 // Output helpers usable from command handlers.
@@ -66,6 +71,23 @@ int cli_write(cli_ctx_t *ctx, const char *s);
 int cli_writen(cli_ctx_t *ctx, const char *s, size_t n);
 int cli_printf(cli_ctx_t *ctx, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
 int cli_vprintf(cli_ctx_t *ctx, const char *fmt, va_list ap);
+
+// Parse a mutable line, expand $NAME variables, and dispatch. Returns
+// the handler's return code or a negative CLI_ERR_* for parse errors.
+// `line` is destructively tokenized; caller keeps ownership.
+int cli_dispatch_line(cli_ctx_t *ctx, char *line);
+
+// Dispatch pre-parsed argv (no parsing, no expansion, no prompt). Used
+// by `run` and `repeat` internally so they can invoke sub-commands
+// without going back through the raw line path.
+int cli_dispatch_argv(cli_ctx_t *ctx, int argc, char **argv);
+
+// Multi-line capture (heredoc): every subsequent line goes to `cb`
+// instead of the command dispatcher, until the callback (or another
+// path) calls cli_capture_end(). Only one capture per ctx.
+void cli_capture_begin(cli_ctx_t *ctx, cli_capture_fn cb);
+void cli_capture_end  (cli_ctx_t *ctx);
+bool cli_is_capturing (const cli_ctx_t *ctx);
 
 #ifdef __cplusplus
 }

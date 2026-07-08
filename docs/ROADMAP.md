@@ -7,6 +7,8 @@
 
 ## ★ シェルスクリプト機能
 
+**Phase A / B / D 実装済み** (2026-07-08)。残るは Phase C(条件分岐)。
+
 **目標**: CLI 上で簡単なスクリプトを書いて自動化できるようにする。
 BLE から手入力するだけでなく、`.script` ファイルとして flash に保存 → 呼び出し可能に。
 
@@ -72,19 +74,24 @@ fi
 
 ### 段階的実装
 
-1. **Phase A: 変数 + 展開**
+1. **Phase A: 変数 + 展開** ✅ 実装済み
    - `set` / `unset` / `env`
-   - `$名前` 展開をパーサに追加
-2. **Phase B: 待機 + ループ**
-   - `sleep` / `repeat`
-   - パースした行を再ディスパッチする内部 API
-3. **Phase C: 条件分岐**
-   - `if` / `while` — 直前コマンドの戻り値(`CLI_OK` = truthy)
-4. **Phase D: スクリプト保存 + 実行**
-   - flash に multi-line スクリプトを書き込む
-   - `run <name>` で行単位に順次ディスパッチ
-
-Phase A 単独でも「LED を named pin で扱う」など実用性は高い。
+   - `$名前` / `${名前}` 展開(post-tokenization、word-splitting なし)
+2. **Phase B: 待機 + ループ** ✅ 実装済み
+   - `sleep <ms|s>` — cyw43_arch_poll を叩きながらの keepalive スリープ
+   - `repeat <n> <cmd...>` — cli_dispatch_argv() で再ディスパッチ
+3. **Phase C: 条件分岐** ⬜ 未着手
+   - `if <cmd>; then <cmd>; [else <cmd>;] fi`
+   - `while <cmd>; do <cmd>; done`
+   - 実装案: `;` を argv 内で分割 + 直前 rc をシェル変数 `?` に保存
+4. **Phase D: スクリプト保存 + 実行** ✅ 実装済み
+   - 16 スロット × 4 KB の flash 領域 (0x185000〜)
+   - CRC-32 付きレコード、`storage/scripts.c`
+   - `script save <name>` — BLE ヒアドキュメント (`.end` で終了)
+   - `script fetch <name> <url>` — HTTP GET
+   - `script list` / `show` / `rm`
+   - `run <name>` — 1 行ずつ dispatch(コメント行 `#` サポート)
+   - ネストした `run` は未対応(将来 `depth` 制御にすれば追加可能)
 
 ---
 

@@ -34,14 +34,17 @@ set(APP_SOURCES
     src/cli/cli.c
     src/cli/parser.c
     src/cli/command.c
+    src/cli/duration.c
     ${CLI_COMMAND_SOURCES}
     src/ble/ble_nus.c
     src/system/log.c
     src/system/uptime.c
     src/system/sysinfo.c
+    src/system/vars.c
     src/drivers/gpio_ctrl.c
     src/drivers/adc_ctrl.c
     src/storage/config.c
+    src/storage/scripts.c
     src/network/wifi.c
     src/network/http_get.c
 )
