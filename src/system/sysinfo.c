@@ -3,6 +3,7 @@
 #include "system/uptime.h"
 #include "ble/ble_nus.h"
 #include "network/wifi.h"
+#include "drivers/temp_sensor.h"
 
 #include "pico/version.h"
 #include "hardware/clocks.h"
@@ -57,6 +58,13 @@ void sysinfo_print(cli_ctx_t *ctx) {
         cli_printf(ctx, "  %-14s : connected (%s)\r\n", "Wi-Fi", ip);
     } else {
         print_kv(ctx, "Wi-Fi", "disconnected");
+    }
+
+    float c;
+    if (temp_sensor_read_c(&c)) {
+        int c10 = (int)(c * 10.0f + (c >= 0 ? 0.5f : -0.5f));
+        cli_printf(ctx, "  %-14s : %d.%d C\r\n", "Temp",
+                   c10 / 10, c10 < 0 ? -c10 % 10 : c10 % 10);
     }
 
     char up[32];

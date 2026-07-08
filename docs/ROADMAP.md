@@ -80,10 +80,10 @@ fi
 2. **Phase B: 待機 + ループ** ✅ 実装済み
    - `sleep <ms|s>` — cyw43_arch_poll を叩きながらの keepalive スリープ
    - `repeat <n> <cmd...>` — cli_dispatch_argv() で再ディスパッチ
-3. **Phase C: 条件分岐** ⬜ 未着手
-   - `if <cmd>; then <cmd>; [else <cmd>;] fi`
-   - `while <cmd>; do <cmd>; done`
-   - 実装案: `;` を argv 内で分割 + 直前 rc をシェル変数 `?` に保存
+3. **Phase C: 条件分岐** ✅ 実装済み
+   - `if COND then BODY [else ELSE]` — キーワードベース(セミコロンなし)
+   - `while COND do BODY` — 10000 回上限
+   - `$?` にディスパッチ後の rc を自動格納(cli_dispatch_argv 経由)
 4. **Phase D: スクリプト保存 + 実行** ✅ 実装済み
    - 16 スロット × 4 KB の flash 領域 (0x185000〜)
    - CRC-32 付きレコード、`storage/scripts.c`
@@ -96,6 +96,9 @@ fi
 ---
 
 ## ★ イベント駆動 / GPIO バインディング
+
+✅ 実装済み (2026-07-08)。詳細は README の該当セクション。
+以下は当初の設計メモを残しておく(実装との差分は将来必要に応じて追記)。
 
 **目標**: 「ピン X が high になったら script_name を実行」のような
 イベント連動を宣言的に書けるようにする。ラベル貼り替えだけで
@@ -155,6 +158,9 @@ bind gpio 2 rise pulse_led
 ---
 
 ## ★ 関数定義 (Python `def` 相当)
+
+方式 A(引数付き `run`)✅ 実装済み (2026-07-08)。
+方式 B(インライン `def NAME { ... }`)⬜ 未着手 — 以下設計案。
 
 **目標**: シェルスクリプト内で関数を定義し、引数を渡して呼び出せる。
 既存の `run <name>` を拡張する方向で最小コストで実現できる見込み。
@@ -247,16 +253,14 @@ typedef struct {
 
 ## 追加ペリフェラルドライバ
 
-`src/drivers/` に薄いラッパを追加し、対応 CLI コマンドを 1 つずつ。
-
-| 機能 | ドライバファイル | CLI コマンド案 |
-|---|---|---|
-| **PWM** | `drivers/pwm_ctrl.c` | `pwm <slice> freq <hz> duty <pct>` |
-| **I2C** | `drivers/i2c_ctrl.c` | `i2c <bus> scan` / `i2c <bus> read <addr> <len>` / `i2c <bus> write <addr> <hex>` |
-| **SPI** | `drivers/spi_ctrl.c` | `spi <bus> xfer <hex>` |
-| **UART** | `drivers/uart_ctrl.c` | `uart <inst> send <text>` / `uart <inst> tail` |
-| **WS2812** | `drivers/ws2812_ctrl.c` (PIO) | `neopixel <count> set <index> <RRGGBB>` |
-| **温度センサ (内蔵)** | `drivers/temp_sensor.c` | `temp` |
+| 機能 | ドライバファイル | CLI コマンド | 状態 |
+|---|---|---|---|
+| **PWM** | `drivers/pwm_ctrl.c` | `pwm <pin> <hz> <duty> / pwm <pin> off` | ✅ |
+| **I2C** | `drivers/i2c_ctrl.c` | `i2c <bus> scan|read|write` | ✅ |
+| **温度センサ (内蔵)** | `drivers/temp_sensor.c` | `temp`, `system info` | ✅ |
+| **SPI** | `drivers/spi_ctrl.c` | `spi <bus> xfer <hex>` | ⬜ |
+| **UART** | `drivers/uart_ctrl.c` | `uart <inst> send <text>` / `uart <inst> tail` | ⬜ |
+| **WS2812** | `drivers/ws2812_ctrl.c` (PIO) | `neopixel <count> set <index> <RRGGBB>` | ⬜ |
 
 各ドライバは lazy init + 予約リソース申告 + 範囲バリデーションのパターンを踏襲。
 

@@ -23,6 +23,7 @@
 #include "pico_ota/ota.h"
 #include "pico_ota/log.h"
 #include "storage/config.h"
+#include "system/bindings.h"
 #include "system/log.h"
 
 #include <stdio.h>
@@ -33,12 +34,22 @@
 
 static cli_ctx_t g_ble_ctx;
 static cli_ctx_t g_usb_ctx;
+static cli_ctx_t g_bg_ctx;      // background ctx: silent output, used by bindings
 
 static int usb_cli_write(const char *data, size_t len, void *user) {
     (void)user;
     if (len == 0) return 0;
     fwrite(data, 1, len, stdout);
     fflush(stdout);
+    return 0;
+}
+
+// Sink that swallows output. Bindings execute asynchronously so their
+// command output would smear whatever the user is currently typing at
+// the BLE prompt. Any interesting side-effects show up in the log sink
+// (USB CDC) rather than being lost entirely.
+static int null_cli_write(const char *data, size_t len, void *user) {
+    (void)data; (void)len; (void)user;
     return 0;
 }
 
@@ -161,6 +172,20 @@ static void ota_auto_confirm(btstack_timer_source_t *ts) {
     ota_confirm();
 }
 
+// --- GPIO bindings dispatcher -----------------------------------------------
+//
+// Bindings fire from GPIO IRQ context, but their command dispatch has
+// to happen on the main thread (LwIP + BTStack + flash writes aren't
+// IRQ-safe). This 20 ms timer drains the pending flags.
+
+static btstack_timer_source_t g_bindings_timer;
+
+static void bindings_timer_expired(btstack_timer_source_t *ts) {
+    bindings_dispatch_pending();
+    btstack_run_loop_set_timer(ts, 20);
+    btstack_run_loop_add_timer(ts);
+}
+
 // ---- Wi-Fi auto-connect ----------------------------------------------------
 //
 // Fires a couple of seconds after boot so BTStack has already brought
@@ -214,8 +239,10 @@ int main(void) {
 
     cli_init(&g_ble_ctx, ble_nus_cli_write, NULL);
     cli_init(&g_usb_ctx, usb_cli_write,     NULL);
+    cli_init(&g_bg_ctx,  null_cli_write,    NULL);
 
     ota_init();
+    bindings_init(&g_bg_ctx);
 
     ble_nus_set_rx_callback(on_ble_rx, NULL);
     ble_nus_set_connect_callback(on_ble_connect, NULL);
@@ -247,6 +274,11 @@ int main(void) {
     g_ota_confirm_timer.process = ota_auto_confirm;
     btstack_run_loop_set_timer(&g_ota_confirm_timer, 30000);
     btstack_run_loop_add_timer(&g_ota_confirm_timer);
+
+    // GPIO bindings pump — 20 ms cadence.
+    g_bindings_timer.process = bindings_timer_expired;
+    btstack_run_loop_set_timer(&g_bindings_timer, 20);
+    btstack_run_loop_add_timer(&g_bindings_timer);
 
     btstack_run_loop_execute();
     return 0;  // unreachable

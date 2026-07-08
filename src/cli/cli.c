@@ -2,6 +2,7 @@
 #include "cli/cli.h"
 #include "cli/command.h"
 #include "cli/parser.h"
+#include "cli/shell_state.h"
 #include "system/vars.h"
 #include "system/version.h"
 
@@ -90,6 +91,11 @@ bool cli_is_capturing(const cli_ctx_t *ctx) {
 #define CLI_EXPAND_BUF_SIZE 512
 static char g_expand_buf[CLI_EXPAND_BUF_SIZE];
 
+// Single-char specials handled by shell_state (positional args + $?).
+static bool is_shell_special(char c) {
+    return (c >= '0' && c <= '9') || c == '#' || c == '?';
+}
+
 static bool expand_argv(char **argv, int argc) {
     size_t off = 0;
     for (int i = 0; i < argc; i++) {
@@ -100,24 +106,32 @@ static bool expand_argv(char **argv, int argc) {
                 const char *s = src + 1;
                 bool braced = (*s == '{');
                 if (braced) s++;
-                if (!vars_name_char_first(*s)) {
-                    // Bare '$' or invalid — treat literally.
+
+                const char *val = NULL;
+
+                if (is_shell_special(*s)) {
+                    // $0..$9, $#, $?  — shell_state owns these.
+                    char name[2] = { *s, '\0' };
+                    val = shell_expand(name);
+                    s++;
+                } else if (vars_name_char_first(*s)) {
+                    const char *name_start = s;
+                    while (vars_name_char_rest(*s)) s++;
+                    size_t name_len = (size_t)(s - name_start);
+                    if (name_len > VAR_NAME_MAX) return false;
+                    char name[VAR_NAME_MAX + 1];
+                    memcpy(name, name_start, name_len);
+                    name[name_len] = '\0';
+                    val = vars_get(name);
+                } else {
+                    // Bare `$` or invalid — treat literally.
                     if (off >= CLI_EXPAND_BUF_SIZE - 1) return false;
                     g_expand_buf[off++] = '$';
                     src++;
                     continue;
                 }
-                const char *name_start = s;
-                while (vars_name_char_rest(*s)) s++;
-                size_t name_len = (size_t)(s - name_start);
-                if (name_len > VAR_NAME_MAX) return false;
-
-                char name[VAR_NAME_MAX + 1];
-                memcpy(name, name_start, name_len);
-                name[name_len] = '\0';
                 if (braced && *s == '}') s++;
 
-                const char *val = vars_get(name);
                 if (val) {
                     size_t vl = strlen(val);
                     if (off + vl >= CLI_EXPAND_BUF_SIZE) return false;
@@ -144,10 +158,13 @@ int cli_dispatch_argv(cli_ctx_t *ctx, int argc, char **argv) {
     const cli_command_t *cmd = cli_command_find(argv[0]);
     if (!cmd) {
         cli_printf(ctx, "%s: command not found\r\n", argv[0]);
+        shell_set_status(CLI_ERR_ARG);
         return CLI_ERR_ARG;
     }
     int rc = cmd->handler(argc, argv, ctx);
     if (rc == CLI_ERR_USAGE) cli_usage(ctx, cmd);
+    // Expose the return code as $? for the next command / conditional.
+    shell_set_status(rc);
     return rc;
 }
 

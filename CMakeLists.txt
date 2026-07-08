@@ -35,14 +35,19 @@ set(APP_SOURCES
     src/cli/parser.c
     src/cli/command.c
     src/cli/duration.c
+    src/cli/shell_state.c
     ${CLI_COMMAND_SOURCES}
     src/ble/ble_nus.c
     src/system/log.c
     src/system/uptime.c
     src/system/sysinfo.c
     src/system/vars.c
+    src/system/bindings.c
     src/drivers/gpio_ctrl.c
     src/drivers/adc_ctrl.c
+    src/drivers/pwm_ctrl.c
+    src/drivers/temp_sensor.c
+    src/drivers/i2c_ctrl.c
     src/storage/config.c
     src/storage/scripts.c
     src/network/wifi.c
@@ -79,6 +84,8 @@ function(add_app_slot slot_letter slot_id)
         pico_cyw43_arch_lwip_poll
         hardware_adc
         hardware_gpio
+        hardware_pwm
+        hardware_i2c
         hardware_watchdog
         hardware_clocks
         hardware_flash
