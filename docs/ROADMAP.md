@@ -95,6 +95,132 @@ fi
 
 ---
 
+## ★ イベント駆動 / GPIO バインディング
+
+**目標**: 「ピン X が high になったら script_name を実行」のような
+イベント連動を宣言的に書けるようにする。ラベル貼り替えだけで
+プロトタイピングが完結する。
+
+### 使い方の例
+
+```sh
+# GPIO 2 が high になったら script_name を実行
+bind gpio 2 high script_name
+
+# エッジ検出も欲しい (rise / fall / change)
+bind gpio 3 rise blink_led
+bind gpio 3 fall stop_motor
+
+# インラインコマンドも許可(script 化するほどでない用)
+bind gpio 4 change "gpio 5 toggle"
+
+# 一覧・解除
+bindings
+unbind gpio 2
+```
+
+スクリプト内からも書けるとよい:
+
+```sh
+# init.script:
+set LED=5
+bind gpio 2 rise pulse_led
+```
+
+### 実装ヒント
+
+- **トリガの種類:**
+  - `high` / `low` = 「状態が変わってその値になった」= 実質エッジ
+  - `rise` / `fall` = エッジ明示
+  - `change` = rise | fall
+- **登録テーブル**: `system/bindings.c` に固定スロット(16 個くらい)。
+  各エントリ: `{pin, edge, target_kind (script/cmd), name_or_cmd[64]}`。
+- **IRQ ハンドラは絶対に軽く**: pico-sdk の `gpio_set_irq_enabled_with_callback` を
+  使い、ハンドラ内は「フラグを立ててキューに登録」だけ。
+  実行は BTStack timer が拾って main-thread context でディスパッチ。
+- **チャタリング対策**: `debounce <ms>` オプションで直近発火から
+  N ms 経過してなければ捨てる。デフォルト 20 ms。
+- **再入防止**: 実行中の bind ハンドラが再度発火しても実行しない
+  (in-flight フラグ)。
+- **保存**: `bindings save` で config セクタに保存 → 起動時自動復元。
+- **セーフティ**: `unbind all` を用意して事故に備える。
+
+### 検討事項
+
+- IRQ で拾えるのは基本エッジのみ。「level high 継続」を厳密に検出したいなら
+  ポーリング(20 ms 間隔の BTStack timer)にフォールバックする実装も要。
+- CYW43 予約 GPIO(23〜25)にはバインドを拒否。
+- ADC ピン(26〜29)は bind の意味が薄い(閾値付き `adc_bind` は将来別枠で)。
+
+---
+
+## ★ 関数定義 (Python `def` 相当)
+
+**目標**: シェルスクリプト内で関数を定義し、引数を渡して呼び出せる。
+既存の `run <name>` を拡張する方向で最小コストで実現できる見込み。
+
+### 使い方の例
+
+**方式 A: 引数付き `run`(既存 script 拡張)**
+
+```sh
+# script save blink
+: gpio $1 latch $2
+: .end
+
+> run blink 5 200ms       # $1=5, $2=200ms
+> run blink 3 50ms
+```
+
+- `$1`〜`$9` は run 開始時にシェル変数として設定(既存 `set` と互換)
+- `$#` = 引数の個数
+- `$?` = 直前コマンドの戻り値
+- 現行 `run` に「サブシェル的な変数スコープ」を導入するかは要検討
+  (グローバル汚染が嫌なら save/restore)
+
+**方式 B: インライン `def` ブロック**
+
+```sh
+def blink {
+  gpio $1 latch $2
+}
+
+blink 5 200ms
+```
+
+- スクリプト内で `def NAME { ... }` を評価 → `NAME` がコマンドテーブルに登録
+- `def` の解析は `{` と `}` を括る特殊なパースが必要
+- 登録先: **通常の CLI コマンドテーブルには入れない**(constructor 経由でなく動的)、
+  別テーブル `functions.c` を用意して `cli_command_find` から先に検索
+
+### 実装ヒント
+
+- **まず方式 A を実装**(既存 `run` に位置引数対応を足す + `$?`)。
+  Phase D の延長線で 100 LoC くらいで済む。
+- **方式 B は次段階**。パーサに `{ ... }` ブロック検出を追加、
+  関数テーブルは動的登録型に。呼び出し検出は
+  `cli_dispatch_argv` の入口で「関数テーブルに argv[0] があれば
+  そのブロックを cli_dispatch_line ループで実行」。
+- **再帰・ネスト**: 現行 `run` はネスト不可 → 関数呼び出しでも同じ制約が付く。
+  内部で `depth` カウンタ + 上限(4 くらい)を導入すれば解禁できる。
+- **戻り値**: 関数内の最後のコマンドの rc を `$?` に伝える。
+  明示的な `return N` は必要になったら追加。
+
+### 依存関係
+
+- Phase C(if/while)と組み合わさると特に強力になる:
+  ```sh
+  def blink_if_button {
+    if gpio 2 read; then
+      gpio $1 latch $2
+    fi
+  }
+  bind gpio 2 rise blink_if_button 5 200ms
+  ```
+- 上記の bindings と組み合わさると宣言的で強い。
+
+---
+
 ## 設定保存の汎用化
 
 現在 `storage/config.c` は Wi-Fi 資格情報専用の単一レコード。
